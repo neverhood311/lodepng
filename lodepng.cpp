@@ -5104,6 +5104,49 @@ static unsigned readChunk_sBIT(LodePNGInfo* info, const unsigned char* data, siz
 
   return 0; /* OK */
 }
+
+/*3D/4D dimensions of voxel PNG data (diMT)*/
+static unsigned readChunk_diMT(LodePNGInfo* info, const unsigned char* data, size_t chunkLength) {
+  if (chunkLength != 21) return 120;
+  
+  // read the number of dimensions
+  info->dimND_numDimensions = data[0];
+  if (info->dimND_numDimensions < 3 || info->dimND_numDimensions > 4) return 117;
+  
+  // read the X, Y, Z, and possibly W dimensions of the 3D/4D PNG
+  info->dimND_x = (data[1] << 24) | (data[2] << 16) | (data[3] << 8) | data[4];
+  info->dimND_y = (data[5] << 24) | (data[6] << 16) | (data[7] << 8) | data[8];
+  info->dimND_z = (data[9] << 24) | (data[10] << 16) | (data[11] << 8) | data[12];
+  if (info->dimND_numDimensions == 3)
+    info->dimND_w = (data[13] << 24) | (data[14] << 16) | (data[15] << 8) | data[16];
+  else
+    info->dimND_w = 1;
+    
+  // assert no duplicate major/minor axes
+  if (data[17] == data[18] || data[17] == data[19] || data[17] == data[20] || data[18] == data[19] || data[18] == data[20] || data[19] == data[20]) return 119;
+  
+  // assert value major and minor axis indices
+  if (info->dimND_numDimensions == 3) {
+    if (data[17] >= 3 && data[17] < 255) return 118;
+    if (data[18] >= 3 && data[18] < 255) return 118;
+    if (data[19] >= 3 && data[19] < 255) return 118;
+    if (data[20] >= 3 && data[20] < 255) return 118;
+  }
+  else{ // info->dimND_numDimensions == 4
+    if (data[17] >= 4) return 118;
+    if (data[18] >= 4) return 118;
+    if (data[19] >= 4) return 118;
+    if (data[20] >= 4) return 118;
+  }
+  
+  // read the major and minor axis mapping
+  info->dimND_minorAxis1 = data[17];
+  info->dimND_minorAxis2 = data[18];
+  info->dimND_majorAxis1 = data[19];
+  info->dimND_majorAxis2 = data[20];
+    
+  info->dimND_defined = 1;
+}
 #endif /*LODEPNG_COMPILE_ANCILLARY_CHUNKS*/
 
 unsigned lodepng_inspect_chunk(LodePNGState* state, size_t pos,
@@ -5147,6 +5190,8 @@ unsigned lodepng_inspect_chunk(LodePNGState* state, size_t pos,
     error = readChunk_iCCP(&state->info_png, &state->decoder, data, chunkLength);
   } else if(lodepng_chunk_type_equals(chunk, "sBIT")) {
     error = readChunk_sBIT(&state->info_png, data, chunkLength);
+  } else if(lodepng_chunk_type_equals(chunk, "diMT")) {
+    error = readChunk_diMT(&state->info_png, data, chunkLength);
 #endif /*LODEPNG_COMPILE_ANCILLARY_CHUNKS*/
   } else {
     /* unhandled chunk is ok (is not an error) */
@@ -5294,6 +5339,14 @@ static void decodeGeneric(unsigned char** out, unsigned* w, unsigned* h,
       if(state->error) break;
     } else if(lodepng_chunk_type_equals(chunk, "sBIT")) {
       state->error = readChunk_sBIT(&state->info_png, data, chunkLength);
+      if(state->error) break;
+    } else if(lodepng_chunk_type_equals(chunk, "diMT")) {
+      state->error = readChunk_diMT(&state->info_png, data, chunkLength);
+      if(!state->error){
+        if ((state->info_png.dimND_x * state->info_png.dimND_y * state->info_png.dimND_z * state->info_png.dimND_w) != ((*w) * (*h))){
+          state->error = 116;
+        }
+      }
       if(state->error) break;
 #endif /*LODEPNG_COMPILE_ANCILLARY_CHUNKS*/
     } else /*it's not an implemented chunk type, so ignore it: skip over the data*/ {
@@ -5822,6 +5875,30 @@ static unsigned addChunk_sBIT(ucvector* out, const LodePNGInfo* info) {
     chunk[11] = info->sbit_a;
   }
   if(chunk) lodepng_chunk_generate_crc(chunk);
+  return 0;
+}
+
+static unsigned addChunk_diMT(ucvector* out, const LodePNGInfo* info) {
+  unsigned char* chunk;
+  
+  // initialize the chunk
+  CERROR_TRY_RETURN(lodepng_chunk_init(&chunk, out, 21, "diMT"));
+  chunk[8] = info->dimND_numDimensions;
+  
+  // add 3D/4D dimensions data
+  lodepng_set32bitInt(chunk + 9, info->dimND_x);
+  lodepng_set32bitInt(chunk + 13, info->dimND_y);
+  lodepng_set32bitInt(chunk + 17, info->dimND_z);
+  lodepng_set32bitInt(chunk + 21, info->dimND_w);
+  
+  // add the major/minor axis mapping
+  chunk[25] = info->dimND_minorAxis1;
+  chunk[26] = info->dimND_minorAxis2;
+  chunk[27] = info->dimND_majorAxis1;
+  chunk[28] = info->dimND_majorAxis2;
+  
+  // generate the CRC data
+  lodepng_chunk_generate_crc(chunk);
   return 0;
 }
 
@@ -6482,6 +6559,10 @@ unsigned lodepng_encode(unsigned char** out, size_t* outsize,
       state->error = addChunk_sBIT(&outv, &info);
       if(state->error) goto cleanup;
     }
+    if(info_png->dimND_defined) {
+      state->error = addChunk_diMT(&outv, &info);
+      if(state->error) goto cleanup;
+    }
 #endif /*LODEPNG_COMPILE_ANCILLARY_CHUNKS*/
     /*PLTE*/
     if(info.color.colortype == LCT_PALETTE) {
@@ -6785,6 +6866,11 @@ const char* lodepng_error_text(unsigned code) {
     case 113: return "ICC profile unreasonably large";
     case 114: return "sBIT chunk has wrong size for the color type of the image";
     case 115: return "sBIT value out of range";
+    case 116: return "diMT 3D/4D dimensions do not factor into image 2D dimensions";
+    case 117: return "diMT invalid number of dimensions (must be either 3 or 4)";
+    case 118: return "diMT invalid major/minor axis index (must be 0, 1, 2, or 3)";
+    case 119: return "diMT duplicate major/minor axis index";
+    case 120: return "diMT invalid chunk size";
   }
   return "unknown error code";
 }

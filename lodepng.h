@@ -664,7 +664,71 @@ typedef struct LodePNGInfo {
   unsigned sbit_a;       /*alpha component of significant bits*/
 
   /* End of color profile related chunks */
-
+  
+  /*
+  diMT chunk: 3D/4D dimensions of image data.
+  
+  3D/4D volume data is arranged in the 2D image using "Dimensional Stacking", a technique
+  which encodes data from multiple dimensions onto a single dimension. Flattening a 2D/3D/4D grid
+  into a 1D array of data is an example of Dimensional Stacking.
+  
+  A Minor Axis is an axis which maps directly to the underlying 2D image data. In other words,
+  a step of one pixel along a minor axis is also a step of one pixel within the 2D image data.
+  Conversely, a Major Axis is an axis which is stacked along an axis on the 2D image data. To take
+  a step of one pixel along a major axis, you must take multiple steps along that axis within the
+  2D image data.
+  
+  The four unint32_t values represent the 3D/4D dimensions of the encoded volume grid.
+  The four [minor|major]Axis values map 3D/4D volume axes to the major and minor axes of the 2D
+  image. Each of these contains the index of the volume axis (0=X, 1=Y, 2=Z, 3=W) that is mapped
+  to each of the major and minor axes of the 2D image.
+  
+  Examples:
+  With dimensions (3,3,2) and minorAxis1=0 (x), minorAxis2=1 (y), majorAxis2=2 (z), we have:
+  
+          x0 x1 x2
+          -- -- --
+      y0 |*  *  * |
+  z0  y1 |*  *  * |
+      y2 |*  *  * |
+          -- -- --
+      y0 |*  *  * |
+  z1  y1 |*  *  * |
+      y2 |*  *  * |
+          -- -- --
+          
+  With dimensions (3,3,2) and minorAxis1=0 (x), minorAxis2=1 (y), majorAxis1=2 (z), we have:
+         z0       z1
+      x0 x1 x2 x0 x1 x2
+      -- -- -- -- -- --
+  y0 |*  *  * |*  *  * |
+  y1 |*  *  * |*  *  * |
+  y2 |*  *  * |*  *  * |
+      -- -- -- -- -- --
+  
+  With dimensions (2,2,2,2) and minorAxis1=0 (x), minorAxis2=1 (y), majorAxis1=2 (z), majorAxis2=3 (w), we have:
+            z0       z1
+         x0 x1 x2 x0 x1 x2
+         -- -- -- -- -- --
+     y0 |*  *  * |*  *  * |
+  w0 y1 |*  *  * |*  *  * |
+     y2 |*  *  * |*  *  * |
+         -- -- -- -- -- --
+     y0 |*  *  * |*  *  * |
+  w1 y1 |*  *  * |*  *  * |
+     y2 |*  *  * |*  *  * |
+         -- -- -- -- -- --
+  */
+ unsigned dimND_defined;    /*are 3D dimensions given? If not, the values below are unused*/
+ unsigned dimND_numDimensions;  /*the number of dimensions of the volume grid (3 or 4)*/
+ uint32_t dimND_x;          /*x dimension of the volume grid*/
+ uint32_t dimND_y;          /*y dimension of the volume grid*/
+ uint32_t dimND_z;          /*z dimension of the volume grid*/
+ uint32_t dimND_w;          /*w dimension of the volume grid. Set to 0 if dimND_numDimensions is 3*/
+ unsigned dimND_minorAxis1; /*the minor horizontal axis of the 2D image*/
+ unsigned dimND_minorAxis2; /*the minor vertical axis of the 2D image*/
+ unsigned dimND_majorAxis1; /*the major horizontal axis of the 2D image*/
+ unsigned dimND_majorAxis2; /*the major vertical axis of the 2D image*/
 
   /*
   unknown chunks: chunks not known by LodePNG, passed on byte for byte.
